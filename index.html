@@ -1,7 +1,115 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="es">
 <head>
-   <meta http-equiv="refresh" content="0; url=Src/index.html">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Futbol Argentino — Galería y Simulador (Proyecto)</title>
+
+  <!-- ESTILOS (AJUSTADO PARA GITHUB PAGES) -->
+  <link rel="stylesheet" href="Src/styles.css">
 </head>
-<body></body>
+<body>
+  <header class="site-header">
+    <div class="wrap">
+      <h1>Fútbol Argentino — Galería de Logos &amp; Simulador</h1>
+      <p class="muted">Repositorio: <em>futbol-argentino-simulador</em> — Página principal. Generado automáticamente.</p>
+    </div>
+  </header>
+
+  <div class="wrap main-grid">
+    <!-- Left: navegación / controles -->
+    <aside class="sidebar">
+      <h2>Acciones rápidas</h2>
+      <ul class="actions">
+        <li><button id="btn-refresh" class="btn">Recargar equipos (teams.json)</button></li>
+        <li><a class="btn link" href="README.md" target="_blank">Leer README</a></li>
+      </ul>
+
+      <hr>
+
+      <h3>Buscar logo</h3>
+      <input id="search" placeholder="Escribe parte del nombre (ej. River)" />
+
+      <hr>
+
+      <h3>Simulación — parámetros iniciales</h3>
+      <p class="muted small">Define aquí el objetivo y el horizonte temporal. El motor de simulación se encuentra en <code>Src/simulator.js</code>.</p>
+      
+      <label>Horizonte (años)<br><input id="input-years" type="number" value="6" min="1" /></label>
+      <label>Formato deseado (JSON simple)<br>
+        <textarea id="input-target-format" rows="3" placeholder='e.g. {"primera":22,"nacional":32,"federalA":40,"bmetro":20,"primeraC":20,"promocional":16}'></textarea>
+      </label>
+      <label>Fechas por temporada<br><input id="input-days" type="number" value="30" min="1" /></label>
+
+      <div style="margin-top:8px">
+        <button id="btn-simulate" class="btn primary">Simular</button>
+        <button id="btn-export" class="btn">Exportar plan (JSON)</button>
+      </div>
+
+      <hr>
+
+      <h3>Categorías (info)</h3>
+      <ol>
+        <li>1ª — Liga Profesional</li>
+        <li>2ª — Primera Nacional</li>
+        <li>3ª — Federal A (regional)</li>
+        <li>3ª — Primera B Metropolitana (paralela)</li>
+        <li>4ª — Primera C Metropolitana</li>
+        <li>5ª — Torneo Promocional Amateur</li>
+      </ol>
+
+      <p class="muted small">Nota: la 3ª categoría está dividida en dos torneos paralelos (Federal A y B Metro). El simulador permite configurar ascensos/descensos entre ellos y la 2ª.</p>
+    </aside>
+
+    <!-- Right: contenido principal -->
+    <main class="content">
+      <section class="card">
+        <h2>Galería de Logos</h2>
+        <p class="muted">Los logos se cargan desde <code>/data/teams.json</code>. Si no existe, ejecutá el script generator en /tools.</p>
+
+        <div id="gallery-controls" class="toolbar">
+          <label>Ordenar: 
+            <select id="sortSelect">
+              <option value="alpha">Alfabético A→Z</option>
+              <option value="alphaDesc">Z→A</option>
+            </select>
+          </label>
+          <label style="margin-left:12px">Tamaño miniaturas:
+            <input type="range" id="thumbSize" min="48" max="240" value="120">
+          </label>
+        </div>
+
+        <div id="gallery" class="grid"></div>
+
+        <template id="teamTpl">
+          <div class="team-card">
+            <img class="team-logo" src="" alt="logo" />
+            <div class="team-name"></div>
+          </div>
+        </template>
+      </section>
+
+      <section class="card" id="simulationOutput" style="display:none">
+        <h2>Resultado de la simulación</h2>
+        <div id="simSummary">(aquí aparecerá el resumen año por año)</div>
+      </section>
+
+    </main>
+  </div>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <small>Generado por el asistente. Próximo archivo recomendado: <code>Src/gallery.js</code></small>
+    </div>
+  </footer>
+
+  <script>
+    function log(msg){ console.log('[APP]',msg); }
+  </script>
+
+  <!-- JS (RUTAS ACTUALIZADAS) -->
+  <script src="Src/main.js"></script>
+  <script src="Src/simulator.js"></script>
+  <script src="Src/gallery.js"></script>
+</body>
 </html>
