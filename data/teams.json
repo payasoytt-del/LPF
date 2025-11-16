@@ -1,0 +1,10 @@
+[
+  {
+    "name": "Nombre del Equipo 1",
+    "logo": "logos/equipo1.png"
+  },
+  {
+    "name": "Nombre del Equipo 2",
+    "logo": "logos/equipo2.png"
+  }
+]
