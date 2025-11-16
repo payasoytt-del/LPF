@@ -1,605 +1,756 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simulador de Reestructuración de Fútbol Argentino</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script type="module">
-        // --- Configuración e Inicialización de Firebase ---
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, onSnapshot, setDoc, setLogLevel, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import React, { useState, useEffect, useCallback } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getAuth, signInWithCustomToken, signInAnonymously, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged 
+} from 'firebase/auth';
+import { getFirestore, doc, setDoc, collection, onSnapshot, query, orderBy, serverTimestamp, runTransaction } from 'firebase/firestore';
+import { 
+  LogIn, LogOut, Loader2, ArrowUp, ArrowDown, Shuffle, Trophy, TrendingUp, TrendingDown, Clock, User, Settings, Plus, X 
+} from 'lucide-react';
 
-        // Establecer el nivel de logs en Debug para ver errores de Firebase
-        setLogLevel('Debug');
+// --- CONFIGURACIÓN DE FIREBASE Y DATOS INICIALES ---
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
-        let db, auth;
-        let userId = null;
-        let isAuthReady = false;
+// Inicializa Firebase
+const app = Object.keys(firebaseConfig).length ? initializeApp(firebaseConfig) : null;
+const db = app ? getFirestore(app) : null;
+const auth = app ? getAuth(app) : null;
 
-        // Variables globales (proporcionadas por el entorno de Canvas)
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+// Equipos fijos (Canon)
+const CANONICAL_TEAMS = {
+    "Liga Profesional": [
+        "Atlético Tucumán", "Argentinos Juniors", "Banfield", "Barracas Central", "Belgrano",
+        "Boca Juniors", "Central Córdoba (SdE)", "Defensa y Justicia", "Deportivo Riestra", "Estudiantes de La Plata",
+        "Gimnasia y Esgrima (LP)", "Godoy Cruz", "Huracán", "Independiente", "Independiente Rivadavia",
+        "Instituto", "Lanús", "Newell's Old Boys", "Platense", "Racing Club",
+        "River Plate", "Rosario Central", "San Lorenzo", "San Martín (SJ) [LP]", "Sarmiento",
+        "Talleres (C)", "Tigre", "Unión", "Vélez Sarsfield", "Aldosivi"
+    ],
+    "Primera Nacional": [
+        "Agropecuario", "Almagro", "All Boys", "Almirante Brown", "Alvarado",
+        "Arsenal", "Atlanta", "CADU (Zárate)", "Central Norte", "Chacarita Juniors",
+        "Chaco For Ever", "Colegiales", "Colón", "Defensores de Belgrano", "Deportivo Madryn",
+        "Deportivo Maipú", "Deportivo Morón", "Estudiantes (BA)", "Estudiantes (RC)", "Ferro Carril Oeste",
+        "Gimnasia y Esgrima (M)", "Gimnasia y Tiro (S)", "Güemes (SdE)", "Los Andes", "Mitre (SdE)",
+        "Nueva Chicago", "Patronato", "Quilmes", "Racing (Cba)", "San Martín (SJ) [PN]",
+        "San Martín (T)", "San Miguel", "San Telmo", "Talleres (RE)", "Temperley",
+        "Tristán Suárez"
+    ],
+    "Primera B Metro": [
+        "Acassuso", "Argentino de Merlo", "Argentino de Quilmes", "Brown de Adrogué", "Comunicaciones",
+        "CSD Liniers", "Deportivo Armenio", "Deportivo Merlo", "Dock Sud", "Excursionistas",
+        "Fénix", "Flandria", "FC Midland", "Deportivo Laferrere", "Real Pilar",
+        "Sacachispas", "San Martín (B)", "Sportivo Italiano", "UAI Urquiza", "Villa Dálmine",
+        "Villa San Carlos"
+    ],
+    "Federal A": [
+        "9 de Julio (Rafaela)", "Atenas (RC)", "Atlético de Rafaela", "Atlético San Martín (M)", "Bartolomé Mitre",
+        "Ben Hur", "Boca Unidos", "Círculo Deportivo Otamendi", "Cipolletti", "Ciudad de Bolívar",
+        "Costa Brava (LP)", "Crucero del Norte", "Defensores de Belgrano (VR)", "Deportivo Argentino", "Deportivo Rincón",
+        "Douglas Haig", "El Linqueño", "Gimnasia y Esgrima (Ch)", "Gimnasia y Esgrima (CdU)", "Germinal",
+        "Guillermo Brown", "Gutiérrez Sport Club", "Huracán Las Heras", "Independiente (Chivilcoy)", "Juventud Antoniana",
+        "Juventud Unida Universitario", "Kimberley", "Olimpo", "Ramón Santamarina", "San Martín (F)",
+        "Sarmiento (LB)", "Sarmiento (R)", "Sol de América", "Sol de Mayo", "Sportivo Belgrano",
+        "Sportivo Estudiantes", "Sportivo Las Parejas", "Villa Mitre"
+    ],
+    "Primera C": [
+        "Argentino (R)", "Atlas", "Berazategui", "Cañuelas", "Camioneros",
+        "Central Ballester", "Central Córdoba (R)", "Centro Español", "Claypole", "Defensores de Cambaceres",
+        "Deportivo Español", "Deportivo Paraguayo", "El Porvenir", "Estrella del Sur", "General Lamadrid",
+        "Ituzaingó", "Justo José de Urquiza", "Juventud Unida", "Leandro N. Alem", "Lugano",
+        "Luján", "Mercedes", "Muñiz", "Puerto Nuevo", "Sportivo Barracas",
+        "Victoriano Arenas", "Yupanqui"
+    ],
+    "Promocional Amateur": [
+        "Atlético Pilar", "Barrancas FC", "Belgrano de Zárate", "Defensores de Glew", "Deportivo Metalúrgico",
+        "Estrella de Berisso", "Everton de La Plata", "Ezeiza FC", "Juventud de Bernal", "Náutico Hacoaj",
+        "Provincial de Lobos", "SAT (Sindicato Argentino de Televisión)"
+    ]
+};
 
-        const SIMULATION_DOC_PATH = `artifacts/${appId}/public/data/league_structure_simulations/arg_league_sim_dynamic`;
+// Estructura de Liga Inicial (Mantiene los tiers que sugirió el usuario)
+const getInitialLeagueStructure = () => [
+    { id: 'div-1', name: "Liga Profesional", order: 1, teams: CANONICAL_TEAMS["Liga Profesional"], ascend: 0, descend: 2 },
+    { id: 'div-2', name: "Primera Nacional", order: 2, teams: CANONICAL_TEAMS["Primera Nacional"], ascend: 2, descend: 2 },
+    { id: 'div-3A', name: "Primera B Metro", order: 3, teams: CANONICAL_TEAMS["Primera B Metro"], ascend: 1, descend: 1 },
+    { id: 'div-3B', name: "Federal A", order: 3, teams: CANONICAL_TEAMS["Federal A"], ascend: 1, descend: 1 },
+    { id: 'div-4', name: "Primera C", order: 4, teams: CANONICAL_TEAMS["Primera C"], ascend: 2, descend: 1 },
+    { id: 'div-5', name: "Promocional Amateur", order: 5, teams: CANONICAL_TEAMS["Promocional Amateur"], ascend: 1, descend: 1 },
+];
 
-        // Estructura inicial por defecto (si no hay datos guardados)
-        const defaultStructure = [
-            {
-                id: 1, name: "Nivel 1: Liga Profesional", divisions: [
-                    { id: crypto.randomUUID(), name: "Liga Profesional (30)", teams: ["River Plate", "Boca Juniors", "Racing Club", "Independiente", "San Lorenzo", "Vélez Sarsfield", "Estudiantes de La Plata", "Gimnasia y Esgrima (LP)", "Rosario Central", "Newell's Old Boys", "Lanús", "Godoy Cruz", "Talleres (C)", "Atlético Tucumán", "Unión", "Colón", "Defensa y Justicia", "Huracán", "Argentinos Juniors", "Platense", "Barracas Central", "Tigre", "Arsenal", "Sarmiento", "Central Córdoba (SdE)", "Instituto", "Banfield", "Deportivo Riestra", "Independiente Rivadavia", "Aldosivi"], up: 0, down: 4 }
-                ]
-            },
-            {
-                id: 2, name: "Nivel 2: Primera Nacional", divisions: [
-                    { id: crypto.randomUUID(), name: "Primera Nacional (36)", teams: ["Quilmes", "Chacarita Juniors", "Deportivo Morón", "San Martín (T)", "Nueva Chicago", "Ferro Carril Oeste", "Temperley", "Almirante Brown", "Patronato", "Guillermo Brown", "Deportivo Madryn", "Gimnasia y Esgrima (M)", "Estudiantes (BA)", "Almagro", "San Telmo", "Racing (Cba)", "Defensores de Belgrano", "Los Andes", "Mitre (SdE)", "San Martín (SJ)", "Chaco For Ever", "Tristán Suárez", "Güemes (SdE)", "Alvarado", "Agropecuario", "CADU (Zárate)", "Talleres (RE)", "Gimnasia y Tiro (S)", "Deportivo Maipú", "Estudiantes (RC)", "San Miguel", "Central Norte", "Colegiales", "Atlanta", "Villa Dálmine", "Flandria"], up: 4, down: 6 }
-                ]
-            },
-            {
-                id: 3, name: "Nivel 3: Divisiones Paralelas", divisions: [
-                    { id: crypto.randomUUID(), name: "Primera B Metropolitana (21)", teams: ["Deportivo Armenio", "Acassuso", "Comunicaciones", "UAI Urquiza", "Dock Sud", "Villa San Carlos", "Sportivo Italiano", "Deportivo Merlo", "Fénix", "Sacachispas", "Argentino de Merlo", "CSD Liniers", "Excursionistas", "Real Pilar", "Argentino de Quilmes", "Brown de Adrogué", "Deportivo Laferrere", "San Martín (B)", "FC Midland", "Deportivo Español", "Cañuelas"], up: 3, down: 3 },
-                    { id: crypto.randomUUID(), name: "Torneo Federal A (38)", teams: ["Olimpo", "Ciudad de Bolívar", "Douglas Haig", "Juventud Unida Universitario", "Villa Mitre", "Gimnasia y Esgrima (CdU)", "Sportivo Belgrano", "Sarmiento (R)", "Central Norte", "Crucero del Norte", "San Martín (F)", "Boca Unidos", "Huracán Las Heras", "Germinal", "Defensores de Belgrano (VR)", "Cipolletti", "Ramón Santamarina", "Sol de América", "El Linqueño", "Sportivo Las Parejas", "Atenas (RC)", "Independiente (Chivilcoy)", "Sportivo Estudiantes", "Kimberley", "Bartolomé Mitre", "Gutiérrez Sport Club", "Deportivo Rincón", "Juventud Antoniana", "Gimnasia y Esgrima (Ch)", "Círculo Deportivo Otamendi", "Sarmiento (LB)", "Atlético San Martín (M)", "Sol de Mayo", "Ben Hur", "Costa Brava (LP)", "Atlético de Rafaela", "Deportivo Argentino", "9 de Julio (Rafaela)"], up: 3, down: 3 }
-                ]
-            },
-            {
-                id: 4, name: "Nivel 4: Primera C", divisions: [
-                    { id: crypto.randomUUID(), name: "Primera C (27)", teams: ["Berazategui", "Luján", "General Lamadrid", "Muñiz", "Justo José de Urquiza (JJ Urquiza)", "Leandro N. Alem", "Deportivo Paraguayo", "Yupanqui", "Puerto Nuevo", "Victoriano Arenas", "Estrella del Sur", "Defensores de Cambaceres", "El Porvenir", "Juventud Unida", "Centro Español", "Argentino (R)", "Claypole", "Central Córdoba (R)", "Ituzaingó", "Camioneros", "Mercedes", "Atlas", "Lugano", "Central Ballester", "Sportivo Barracas", "El Linqueño", "San Martín (F)"], up: 3, down: 3 }
-                ]
-            },
-            {
-                id: 5, name: "Nivel 5: Promocional Amateur", divisions: [
-                    { id: crypto.randomUUID(), name: "Promocional Amateur (12)", teams: ["SAT (Sindicato Argentino de Televisión)", "Estrella de Berisso", "Juventud de Bernal", "Atlético Pilar", "Ezeiza FC", "Barrancas FC", "Defensores de Glew", "Provincial de Lobos", "Belgrano de Zárate", "Everton de La Plata", "Náutico Hacoaj", "Deportivo Metalúrgico"], up: 3, down: 0 }
-                ]
-            }
-        ];
+// --- FUNCIONES DE UTILIDAD DE FIREBASE ---
+const getLeagueDocRef = (uid) => doc(db, `artifacts/${appId}/users/${uid}/league/current`);
+const getHistoryCollectionRef = () => collection(db, `artifacts/${appId}/public/data/championship_history`);
 
-        // Estado Reactivo de la Aplicación
-        let appStructure = JSON.parse(JSON.stringify(defaultStructure)); // Usar una copia profunda
-        let openAccordions = [];
-        let simulationHistory = [];
+// Genera un ID corto para las nuevas divisiones
+const generateNewDivisionId = (order) => `div-new-${order}-${Date.now().toString().slice(-4)}`;
 
-        // Elementos del DOM
-        const structureContainer = () => document.getElementById('structure-container');
-        const historyContainer = () => document.getElementById('history-container');
-        const messageBox = () => document.getElementById('message-box');
-        const messageText = () => document.getElementById('message-text');
+// --- COMPONENTE PRINCIPAL APP ---
 
-        // --- Funciones de Utilidad ---
+const App = () => {
+    const [leagueStructure, setLeagueStructure] = useState([]);
+    const [currentDivisionId, setCurrentDivisionId] = useState(null);
+    const [user, setUser] = useState(null);
+    const [isAuthReady, setIsAuthReady] = useState(false);
+    const [isSimulating, setIsSimulating] = useState(false);
+    const [history, setHistory] = useState([]);
+    const [error, setError] = useState(null);
+    const [isConfigMode, setIsConfigMode] = useState(false);
+    const [draggedItem, setDraggedItem] = useState(null);
 
-        /** Muestra un mensaje temporal en la UI. */
-        function showMessage(text, isError = false) {
-            messageText().textContent = text;
-            messageBox().className = `p-3 rounded-xl shadow-lg mb-4 text-center ${isError ? 'bg-red-500 text-white' : 'bg-green-500 text-white'} transition-opacity duration-300`;
-            messageBox().classList.remove('opacity-0', 'hidden');
-            messageBox().classList.add('opacity-100');
+    // --- 1. AUTENTICACIÓN Y CARGA DE DATOS ---
 
-            if (!isError) {
-                setTimeout(() => {
-                    messageBox().classList.remove('opacity-100');
-                    messageBox().classList.add('opacity-0');
-                    setTimeout(() => messageBox().classList.add('hidden'), 300);
-                }, 4000);
-            }
+    const handleGoogleSignIn = async () => {
+        if (!auth) return;
+        const provider = new GoogleAuthProvider();
+        try {
+            await signInWithPopup(auth, provider);
+        } catch (error) {
+            console.error("Error al iniciar sesión con Google:", error);
+            setError("Fallo al iniciar sesión con Google.");
         }
+    };
 
-        /** Inicializa la autenticación y el listener de Firestore. */
-        async function initializeFirebase() {
-            if (!firebaseConfig) {
-                console.error("Firebase config no está disponible.");
-                showMessage("Error: Configuración de Firebase no disponible.", true);
-                return;
-            }
+    const handleSignOut = async () => {
+        if (!auth) return;
+        try {
+            await signOut(auth);
+            setUser(null);
+            setError(null);
+        } catch (error) {
+            console.error("Error al cerrar sesión:", error);
+        }
+    };
+    
+    // 1a. Inicialización de Auth
+    useEffect(() => {
+        if (!app) { setError("Firebase no inicializado."); setIsAuthReady(true); return; }
 
+        const authenticate = async () => {
             try {
-                const app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
-                auth = getAuth(app);
-
-                // Autenticar al usuario
                 if (initialAuthToken) {
                     await signInWithCustomToken(auth, initialAuthToken);
                 } else {
                     await signInAnonymously(auth);
                 }
+            } catch (err) {
+                console.error("Error al autenticar:", err);
+            }
+        };
+        authenticate();
 
-                // Esperar el cambio de estado de autenticación
-                onAuthStateChanged(auth, (user) => {
-                    if (user) {
-                        userId = user.uid;
-                        console.log("Usuario autenticado. UID:", userId);
-                        isAuthReady = true;
-                        // Iniciar el listener de Firestore después de la autenticación
-                        setupFirestoreListener();
-                    } else {
-                        userId = crypto.randomUUID();
-                        console.log("Sesión anónima o token no disponible. Usando ID temporal:", userId);
-                        isAuthReady = true;
-                        // Iniciar el listener de Firestore de todas formas, aunque con ID temporal
-                        setupFirestoreListener();
+        const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+            setUser(currentUser);
+            setIsAuthReady(true);
+        });
+
+        return () => unsubscribe();
+    }, []);
+
+    // 1b. Carga y Sincronización de la Estructura de Liga
+    useEffect(() => {
+        if (!db || !user) return;
+
+        const leagueRef = getLeagueDocRef(user.uid);
+        
+        const unsubscribe = onSnapshot(leagueRef, async (docSnap) => {
+            if (docSnap.exists()) {
+                const data = docSnap.data().structure;
+                setLeagueStructure(data);
+                if (!currentDivisionId && data.length > 0) {
+                    setCurrentDivisionId(data[0].id);
+                }
+            } else {
+                // Si no existe, crear la estructura inicial
+                const initialStructure = getInitialLeagueStructure();
+                await setDoc(leagueRef, {
+                    structure: initialStructure,
+                    userId: user.uid,
+                    lastUpdated: serverTimestamp()
+                });
+                setLeagueStructure(initialStructure);
+                if (initialStructure.length > 0) setCurrentDivisionId(initialStructure[0].id);
+            }
+        }, (err) => {
+            console.error("Error cargando estructura de liga:", err);
+            setError("Error al cargar la estructura de la liga.");
+        });
+
+        return () => unsubscribe();
+    }, [db, user]);
+
+    // 1c. Carga del Historial de Campeonatos
+    useEffect(() => {
+        if (!db) return;
+        const q = query(getHistoryCollectionRef(), orderBy("timestamp", "desc"));
+
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const newHistory = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data(),
+                timestamp: doc.data().timestamp?.toDate()
+            }));
+            setHistory(newHistory);
+        }, (err) => {
+            console.error("Error cargando historial:", err);
+            setError("Error al cargar el historial de simulaciones.");
+        });
+
+        return () => unsubscribe();
+    }, [db]);
+
+    // --- 2. GESTIÓN DE ESTADO LOCAL Y FIREBASE ---
+
+    // Guarda el estado actual de la estructura de la liga en Firestore
+    const saveLeagueStructure = useCallback(async (newStructure) => {
+        if (!db || !user) {
+            setError("Error: No hay usuario autenticado o DB no está lista.");
+            return;
+        }
+        try {
+            const leagueRef = getLeagueDocRef(user.uid);
+            await setDoc(leagueRef, {
+                structure: newStructure,
+                userId: user.uid,
+                lastUpdated: serverTimestamp()
+            }, { merge: true });
+            setLeagueStructure(newStructure);
+        } catch (e) {
+            console.error("Error al guardar la estructura:", e);
+            setError("Error al guardar los cambios en la nube.");
+        }
+    }, [db, user]);
+
+    // Actualiza la lista de equipos y guarda
+    const updateDivisionTeams = useCallback((divisionId, newTeams) => {
+        const newStructure = leagueStructure.map(div => 
+            div.id === divisionId ? { ...div, teams: newTeams } : div
+        );
+        saveLeagueStructure(newStructure);
+    }, [leagueStructure, saveLeagueStructure]);
+
+    // Mueve un equipo dentro de una división (Drag/Arrow/Input)
+    const moveTeamInDivision = useCallback((divisionId, movedTeamName, newIndex) => {
+        const division = leagueStructure.find(d => d.id === divisionId);
+        if (!division) return;
+
+        const currentTeams = [...division.teams];
+        const oldIndex = currentTeams.indexOf(movedTeamName);
+
+        if (oldIndex === newIndex) return;
+
+        const [movedItem] = currentTeams.splice(oldIndex, 1);
+        currentTeams.splice(newIndex, 0, movedItem);
+        
+        updateDivisionTeams(divisionId, currentTeams);
+    }, [leagueStructure, updateDivisionTeams]);
+
+    // --- 3. GESTIÓN DE LA CONFIGURACIÓN (Ascensos/Descensos/Divisiones) ---
+
+    const handleRuleChange = (divisionId, rule, value) => {
+        const numericValue = parseInt(value, 10) || 0;
+        const newStructure = leagueStructure.map(div => 
+            div.id === divisionId ? { ...div, [rule]: numericValue } : div
+        );
+        saveLeagueStructure(newStructure);
+    };
+
+    const handleAddDivision = () => {
+        const maxOrder = leagueStructure.reduce((max, div) => Math.max(max, div.order), 0);
+        const newOrder = maxOrder + 1;
+        const newDivision = {
+            id: generateNewDivisionId(newOrder),
+            name: `División ${newOrder}`,
+            order: newOrder,
+            teams: [],
+            ascend: 1,
+            descend: 1,
+        };
+        const newStructure = [...leagueStructure, newDivision].sort((a, b) => a.order - b.order);
+        saveLeagueStructure(newStructure);
+    };
+
+    const handleRemoveDivision = (divisionId) => {
+        // No permitir eliminar la primera división
+        const divisionToRemove = leagueStructure.find(d => d.id === divisionId);
+        if (!divisionToRemove || divisionToRemove.order === 1) return;
+
+        if (!confirm(`¿Estás seguro de que quieres eliminar ${divisionToRemove.name}? Los ${divisionToRemove.teams.length} equipos serán transferidos a la división superior.`)) {
+            return;
+        }
+
+        const teamsToMove = divisionToRemove.teams;
+        const newStructure = leagueStructure.filter(div => div.id !== divisionId);
+
+        // Encontrar la división de destino (Tier superior inmediato o el que tenga el mismo 'order')
+        const targetOrder = divisionToRemove.order === 1 ? 1 : divisionToRemove.order - 1;
+        
+        // Encontrar la división de destino más adecuada (la primera con orden menor)
+        const targetDivision = newStructure
+            .filter(d => d.order < divisionToRemove.order)
+            .sort((a, b) => b.order - a.order)[0];
+
+        if (targetDivision) {
+             const updatedTargetTeams = [...targetDivision.teams, ...teamsToMove];
+             const updatedStructure = newStructure.map(div =>
+                 div.id === targetDivision.id ? { ...div, teams: updatedTargetTeams } : div
+             );
+             saveLeagueStructure(updatedStructure);
+        } else {
+            // Si es la última división y no hay target (solo queda la primera), mover a la primera.
+            const firstDivision = newStructure.find(d => d.order === 1);
+            if(firstDivision) {
+                const updatedFirstTeams = [...firstDivision.teams, ...teamsToMove];
+                const updatedStructure = newStructure.map(div =>
+                    div.id === firstDivision.id ? { ...div, teams: updatedFirstTeams } : div
+                );
+                saveLeagueStructure(updatedStructure);
+            } else {
+                saveLeagueStructure(newStructure); // Solo elimina
+            }
+        }
+    };
+
+
+    // --- 4. LÓGICA DE SIMULACIÓN (Transacción Firestore) ---
+
+    const simulateSeason = async () => {
+        if (!db || !user || isSimulating) return;
+
+        setIsSimulating(true);
+        setError(null);
+        
+        try {
+            await runTransaction(db, async (transaction) => {
+                const leagueRef = getLeagueDocRef(user.uid);
+                const leagueDoc = await transaction.get(leagueRef);
+
+                if (!leagueDoc.exists) {
+                    throw "La estructura de la liga no existe.";
+                }
+
+                const currentStructure = leagueDoc.data().structure;
+                let newStructure = JSON.parse(JSON.stringify(currentStructure)); // Copia profunda
+                const results = {};
+                
+                // 1. Clonar la estructura ordenada por Tier (order)
+                const sortedStructure = [...newStructure].sort((a, b) => a.order - b.order);
+                const maxOrder = sortedStructure[sortedStructure.length - 1].order;
+
+                const promotedTeams = [];
+                const relegatedTeams = [];
+
+                // 2. Determinar Ascensos y Descensos para todas las divisiones
+                for (let i = 0; i < sortedStructure.length; i++) {
+                    const currentDiv = sortedStructure[i];
+                    const nextDiv = sortedStructure.find(d => d.order === currentDiv.order + 1);
+                    const prevDivs = sortedStructure.filter(d => d.order === currentDiv.order - 1);
+                    
+                    const divTeams = currentDiv.teams;
+                    const divResults = { champion: divTeams[0], ascensos: [], descensos: [] };
+
+                    // Ascensos: Los primeros X equipos (X = ascendidos)
+                    if (currentDiv.ascend > 0 && prevDivs.length > 0) {
+                        const teamsToPromote = divTeams.slice(0, currentDiv.ascend);
+                        promotedTeams.push(...teamsToPromote.map(t => ({ name: t, fromId: currentDiv.id, toId: prevDivs[0].id })));
+                        divResults.ascensos = teamsToPromote;
                     }
-                    renderApp(); // Renderizar después de saber el ID de usuario
+
+                    // Descensos: Los últimos X equipos (X = descendidos)
+                    if (currentDiv.descend > 0) {
+                        const teamsToRelegate = divTeams.slice(-currentDiv.descend);
+                        relegatedTeams.push(...teamsToRelegate.map(t => ({ name: t, fromId: currentDiv.id, toOrder: currentDiv.order + 1 })));
+                        divResults.descensos = teamsToRelegate;
+                    }
+                    
+                    results[currentDiv.name] = divResults;
+                }
+                
+                // 3. Aplicar Movimientos
+                
+                // Eliminar equipos de sus divisiones originales
+                newStructure = newStructure.map(div => {
+                    div.teams = div.teams.filter(team => 
+                        !promotedTeams.some(p => p.name === team) && 
+                        !relegatedTeams.some(r => r.name === team)
+                    );
+                    return div;
                 });
 
-            } catch (error) {
-                console.error("Error al inicializar o autenticar Firebase:", error);
-                showMessage(`Error de Firebase: ${error.message}`, true);
-            }
-        }
-
-        /** Configura el listener de tiempo real (onSnapshot). */
-        function setupFirestoreListener() {
-            if (!db) {
-                console.error("Firestore no inicializado.");
-                return;
-            }
-
-            const simDocRef = doc(db, SIMULATION_DOC_PATH);
-
-            onSnapshot(simDocRef, (docSnap) => {
-                if (docSnap.exists()) {
-                    const data = docSnap.data();
-                    try {
-                        appStructure = JSON.parse(data.structure);
-                        openAccordions = JSON.parse(data.openAccordions || '[]');
-                        simulationHistory = JSON.parse(data.history || '[]');
-                        console.log("Simulación cargada exitosamente desde Firestore.");
-                    } catch (e) {
-                        console.error("Error al parsear datos de Firestore:", e);
-                        showMessage("Error al cargar la simulación: datos corruptos.", true);
-                        appStructure = JSON.parse(JSON.stringify(defaultStructure));
+                // Añadir Ascendidos
+                promotedTeams.forEach(p => {
+                    const targetDiv = newStructure.find(d => d.id === p.toId);
+                    if (targetDiv) {
+                        targetDiv.teams = [p.name, ...targetDiv.teams]; // Ponerlos al inicio para el ranking
                     }
-                } else {
-                    console.log("No se encontró simulación. Usando estructura por defecto.");
-                    appStructure = JSON.parse(JSON.stringify(defaultStructure));
-                }
-                renderApp();
-            }, (error) => {
-                console.error("Error al cargar la simulación:", error);
-                // NOTA: Es importante NO usar confirm/alert. Usamos la función showMessage.
-                showMessage(`Error al cargar la simulación: ${error.message}`, true);
-                appStructure = JSON.parse(JSON.stringify(defaultStructure)); // Volver al estado por defecto si falla la carga
-                renderApp();
+                });
+
+                // Añadir Descendidos y crear nueva división si es necesario
+                const lastDivOrder = sortedStructure[sortedStructure.length - 1].order;
+
+                relegatedTeams.forEach(r => {
+                    let targetDiv = newStructure.find(d => d.order === r.toOrder);
+                    
+                    if (!targetDiv) {
+                        // Si no hay división inferior (descenso de la última), crear una nueva
+                        const newId = generateNewDivisionId(r.toOrder);
+                        targetDiv = {
+                            id: newId,
+                            name: `División ${r.toOrder}`,
+                            order: r.toOrder,
+                            teams: [],
+                            ascend: 1, 
+                            descend: 1,
+                        };
+                        newStructure.push(targetDiv);
+                    }
+                    
+                    targetDiv.teams = [...targetDiv.teams, r.name]; // Ponerlos al final
+                });
+
+                // Guardar la nueva estructura de liga (con equipos movidos)
+                transaction.set(leagueRef, {
+                    structure: newStructure.sort((a, b) => a.order - b.order),
+                    userId: user.uid,
+                    lastUpdated: serverTimestamp()
+                }, { merge: true });
+
+                // Guardar el historial de campeonatos (público)
+                const historyRef = doc(getHistoryCollectionRef());
+                transaction.set(historyRef, {
+                    year: new Date().getFullYear(),
+                    date: serverTimestamp(),
+                    user: { id: user.uid, name: user.displayName || 'Anónimo', email: user.email || 'N/A' },
+                    results: results,
+                    promotedTeams: promotedTeams.map(p => p.name),
+                    relegatedTeams: relegatedTeams.map(r => r.name),
+                    timestamp: serverTimestamp()
+                });
             });
+
+        } catch (err) {
+            console.error("Error en la transacción de simulación:", err);
+            setError(`Error al simular: ${err.message || 'Verifica la consola.'}`);
+        } finally {
+            setIsSimulating(false);
         }
+    };
+    
+    // --- COMPONENTES AUXILIARES DE RENDERIZADO ---
 
-        /** Guarda el estado actual de la simulación en Firestore. */
-        async function saveStructure() {
-            if (!db || !isAuthReady) {
-                console.warn("Firestore no listo o autenticación pendiente. No se guardará.");
-                return;
-            }
-
-            const simDocRef = doc(db, SIMULATION_DOC_PATH);
-            const dataToSave = {
-                structure: JSON.stringify(appStructure),
-                openAccordions: JSON.stringify(openAccordions),
-                history: JSON.stringify(simulationHistory),
-                lastUpdated: new Date().toISOString()
-            };
-
-            try {
-                // Usamos setDoc con merge: true si el documento puede no existir.
-                await setDoc(simDocRef, dataToSave, { merge: true });
-                showMessage("Estructura guardada exitosamente.");
-            } catch (error) {
-                console.error("Error al guardar la estructura:", error);
-                showMessage(`Error al guardar la estructura: ${error.message}`, true);
-            }
-        }
-
-        /** Renderiza un equipo dentro de una división. */
-        function renderTeam(teamName, divisionId) {
-            return `
-                <div class="flex items-center justify-between p-1 bg-white hover:bg-gray-50 transition duration-150 rounded-lg shadow-sm">
-                    <span class="text-sm font-medium text-gray-700 truncate">${teamName}</span>
-                    <div class="flex space-x-1">
-                        <button onclick="moveTeam('${teamName}', '${divisionId}', -1)" class="text-gray-400 hover:text-gray-700 transition duration-150 p-1 rounded-full hover:bg-gray-100" title="Subir equipo">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"></path></svg>
-                        </button>
-                        <button onclick="moveTeam('${teamName}', '${divisionId}', 1)" class="text-gray-400 hover:text-gray-700 transition duration-150 p-1 rounded-full hover:bg-gray-100" title="Bajar equipo">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path></svg>
-                        </button>
-                        <button onclick="removeTeam('${teamName}', '${divisionId}')" class="text-red-400 hover:text-red-600 transition duration-150 p-1 rounded-full hover:bg-red-100" title="Eliminar equipo">
-                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                        </button>
-                    </div>
-                </div>
-            `;
-        }
-
-        /** Renderiza una división dentro de un nivel. */
-        function renderDivision(division, levelId) {
-            const isFederal = division.name.includes("Federal");
-            const totalTeams = division.teams.length;
-
-            return `
-                <div class="bg-white p-4 rounded-xl shadow-lg border border-gray-100 transition duration-300 hover:shadow-xl">
-                    <h4 class="text-lg font-semibold text-gray-900 mb-2 border-b pb-2 flex justify-between items-center">
-                        <span>${division.name} (${totalTeams} equipos)</span>
-                        <button onclick="toggleDivisionAccordion('${division.id}')" class="text-blue-500 hover:text-blue-700 transition duration-150">
-                            ${openAccordions.includes(division.id) ? 
-                                `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path></svg>` : 
-                                `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>`
-                            }
-                        </button>
-                    </h4>
-                    
-                    <div class="text-sm text-gray-600 mb-3 space-y-1">
-                        <p class="flex justify-between">
-                            <span class="font-medium text-green-600">Ascensos (UP):</span> 
-                            <input type="number" min="0" value="${division.up}" onchange="updatePromotionRelegation(${levelId}, '${division.id}', 'up', this.value)" class="w-16 p-1 border rounded-md text-right text-gray-700 focus:ring-blue-500 focus:border-blue-500">
-                        </p>
-                        <p class="flex justify-between">
-                            <span class="font-medium text-red-600">Descensos (DOWN):</span>
-                            <input type="number" min="0" value="${division.down}" onchange="updatePromotionRelegation(${levelId}, '${division.id}', 'down', this.value)" class="w-16 p-1 border rounded-md text-right text-gray-700 focus:ring-blue-500 focus:border-blue-500">
-                        </p>
-                    </div>
-
-                    ${openAccordions.includes(division.id) ? `
-                        <div id="division-teams-${division.id}" class="space-y-2 mt-4 max-h-96 overflow-y-auto pr-2 custom-scrollbar">
-                            ${division.teams.map(team => renderTeam(team, division.id)).join('')}
-                        </div>
-                        <div class="mt-4 pt-3 border-t">
-                            <div class="flex space-x-2">
-                                <input type="text" id="add-team-input-${division.id}" placeholder="Nombre del equipo" class="flex-grow p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 text-sm">
-                                <button onclick="addTeam('${division.id}')" class="px-4 py-2 bg-blue-500 text-white font-medium rounded-lg hover:bg-blue-600 transition duration-150 text-sm shadow-md">
-                                    <svg class="w-5 h-5 inline-block -mt-0.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
-                                    Añadir
-                                </button>
-                            </div>
-                        </div>
-                    ` : ''}
-                </div>
-            `;
-        }
-
-        /** Renderiza un nivel (conjunto de divisiones). */
-        function renderLevel(level) {
-            return `
-                <div class="mb-8 border-2 border-indigo-400 rounded-2xl p-6 bg-indigo-50 shadow-2xl">
-                    <h3 class="text-3xl font-extrabold text-indigo-700 mb-6 border-b-4 border-indigo-300 pb-3">${level.name}</h3>
-                    
-                    <div class="grid md:grid-cols-${level.divisions.length > 1 ? '2' : '1'} gap-6">
-                        ${level.divisions.map(division => renderDivision(division, level.id)).join('')}
-                    </div>
-
-                    ${level.divisions.length > 1 ? `
-                        <p class="mt-4 text-sm text-gray-600 italic">Este nivel tiene divisiones paralelas (Metropolitana y Federal). Los ascensos y descensos se manejarán entre los niveles adyacentes si se aplica el simulador de "Impacto".</p>
-                    ` : ''}
-
-                    <div class="mt-6 pt-4 border-t border-indigo-200">
-                        <button onclick="addDivision(${level.id})" class="px-4 py-2 bg-indigo-500 text-white font-medium rounded-lg hover:bg-indigo-600 transition duration-150 text-sm shadow-md">
-                            <svg class="w-5 h-5 inline-block -mt-0.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
-                            Añadir División
-                        </button>
-                        <button onclick="removeLevel(${level.id})" class="ml-3 px-4 py-2 bg-red-500 text-white font-medium rounded-lg hover:bg-red-600 transition duration-150 text-sm shadow-md">
-                            <svg class="w-5 h-5 inline-block -mt-0.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                            Eliminar Nivel
-                        </button>
-                    </div>
-                </div>
-            `;
-        }
-        
-        /** Renderiza la lista de eventos de la simulación. */
-        function renderHistory() {
-            if (historyContainer()) {
-                historyContainer().innerHTML = `
-                    <h3 class="text-xl font-bold text-gray-800 mb-4 border-b pb-2">Historial de Simulación</h3>
-                    ${simulationHistory.length > 0 ? `
-                        <ul class="space-y-2 max-h-64 overflow-y-auto pr-2 custom-scrollbar">
-                            ${simulationHistory.map(item => `
-                                <li class="p-2 text-sm bg-gray-100 rounded-lg border border-gray-200">${new Date(item.timestamp).toLocaleTimeString()} - ${item.action}</li>
-                            `).reverse().join('')}
-                        </ul>
-                        <button onclick="clearHistory()" class="mt-4 px-3 py-1 bg-yellow-500 text-white font-medium rounded-lg hover:bg-yellow-600 transition duration-150 text-sm shadow-md">Limpiar Historial</button>
-                    ` : `
-                        <p class="text-gray-500 italic">No hay acciones registradas aún.</p>
-                    `}
-                `;
-            }
-        }
-
-        /** Renderiza la aplicación completa. */
-        function renderApp() {
-            if (!structureContainer()) return;
-
-            // Renderizar la estructura
-            structureContainer().innerHTML = appStructure.map(renderLevel).join('');
-
-            // Actualizar información general
-            const totalTeams = appStructure.flatMap(level => level.divisions.flatMap(d => d.teams)).length;
-            document.getElementById('total-levels').textContent = appStructure.length;
-            document.getElementById('total-teams').textContent = totalTeams;
-            document.getElementById('user-id-display').textContent = userId;
-
-            // Renderizar el historial
-            renderHistory();
-        }
-
-        // --- Lógica de Modificación de la Estructura (Acciones) ---
-
-        /** Añade un evento al historial y guarda la estructura. */
-        function recordAction(action) {
-            simulationHistory.push({ action, timestamp: new Date().toISOString() });
-            saveStructure();
-        }
-
-        /** Alterna el acordeón de una división. */
-        window.toggleDivisionAccordion = function(divisionId) {
-            const index = openAccordions.indexOf(divisionId);
-            if (index > -1) {
-                openAccordions.splice(index, 1);
-            } else {
-                openAccordions.push(divisionId);
-            }
-            renderApp();
-            saveStructure(); // Guardar el estado de los acordeones
-        }
-
-        /** Actualiza los valores de ascenso o descenso. */
-        window.updatePromotionRelegation = function(levelId, divisionId, type, value) {
-            const level = appStructure.find(l => l.id === levelId);
-            if (level) {
-                const division = level.divisions.find(d => d.id === divisionId);
-                if (division) {
-                    const numValue = parseInt(value) || 0;
-                    if (type === 'up') {
-                        division.up = numValue;
-                        recordAction(`Ascensos de ${division.name} ajustados a ${numValue}`);
-                    } else if (type === 'down') {
-                        division.down = numValue;
-                        recordAction(`Descensos de ${division.name} ajustados a ${numValue}`);
-                    }
-                }
-            }
-        }
-
-        /** Añade un nuevo nivel. */
-        window.addLevel = function() {
-            const newLevel = {
-                id: Math.max(...appStructure.map(l => l.id), 0) + 1,
-                name: `Nivel ${appStructure.length + 1}: Nuevo Nivel`,
-                divisions: [
-                    { id: crypto.randomUUID(), name: `División Única (${appStructure.length + 1})`, teams: [], up: 0, down: 0 }
-                ]
-            };
-            appStructure.push(newLevel);
-            renderApp();
-            recordAction(`Nivel ${newLevel.id} agregado`);
-        }
-
-        /** Elimina un nivel. */
-        window.removeLevel = function(levelId) {
-            const levelIndex = appStructure.findIndex(l => l.id === levelId);
-            if (levelIndex > -1) {
-                const teamsToReallocate = appStructure[levelIndex].divisions.flatMap(d => d.teams);
-                
-                if (teamsToReallocate.length > 0) {
-                    showMessage(`Error: El Nivel ${levelId} aún tiene ${teamsToReallocate.length} equipos. Reasigna o elimina los equipos primero.`, true);
-                    return;
-                }
-
-                appStructure.splice(levelIndex, 1);
-                appStructure.forEach((level, index) => level.id = index + 1); // Reajustar IDs
-                renderApp();
-                recordAction(`Nivel ${levelId} eliminado y reajustados IDs`);
-            }
-        }
-
-        /** Añade una nueva división a un nivel. */
-        window.addDivision = function(levelId) {
-            const level = appStructure.find(l => l.id === levelId);
-            if (level) {
-                const newDivision = {
-                    id: crypto.randomUUID(),
-                    name: `División Paralela ${level.divisions.length + 1}`,
-                    teams: [],
-                    up: 0,
-                    down: 0
-                };
-                level.divisions.push(newDivision);
-                renderApp();
-                recordAction(`Nueva división en Nivel ${levelId} agregada`);
-            }
-        }
-
-        /** Añade un equipo a una división. */
-        window.addTeam = function(divisionId) {
-            const input = document.getElementById(`add-team-input-${divisionId}`);
-            const teamName = input.value.trim();
-
-            if (teamName) {
-                const division = appStructure.flatMap(l => l.divisions).find(d => d.id === divisionId);
-                if (division) {
-                    if (division.teams.includes(teamName)) {
-                        showMessage(`El equipo '${teamName}' ya está en esta división.`, true);
-                        return;
-                    }
-                    division.teams.push(teamName);
-                    input.value = '';
-                    renderApp();
-                    recordAction(`Equipo '${teamName}' agregado a ${division.name}`);
-                }
-            } else {
-                showMessage("Por favor, ingresa el nombre de un equipo.", true);
-            }
-        }
-
-        /** Mueve un equipo hacia arriba o abajo entre niveles/divisiones. */
-        window.moveTeam = function(teamName, currentDivisionId, direction) {
-            const allDivisions = appStructure.flatMap(level => level.divisions.map(d => ({ ...d, levelId: level.id, levelName: level.name })));
-            const currentDivisionIndex = allDivisions.findIndex(d => d.id === currentDivisionId);
+    const DivisionConfigPanel = ({ division }) => (
+        <div className="bg-gray-100 p-3 rounded-lg border border-gray-300 transition-shadow hover:shadow-md mb-2">
+            <div className="flex justify-between items-center mb-2">
+                <input
+                    type="text"
+                    value={division.name}
+                    onChange={(e) => {
+                        const newStructure = leagueStructure.map(d =>
+                            d.id === division.id ? { ...d, name: e.target.value } : d
+                        );
+                        saveLeagueStructure(newStructure);
+                    }}
+                    className="text-lg font-semibold w-2/3 bg-transparent border-b border-gray-400 focus:border-indigo-600 outline-none"
+                />
+                {division.order > 1 && ( // No permitir borrar la primera división
+                    <button onClick={() => handleRemoveDivision(division.id)} className="p-1 text-red-500 hover:text-red-700 transition">
+                        <X className="w-5 h-5" />
+                    </button>
+                )}
+            </div>
             
-            if (currentDivisionIndex === -1) return;
+            <p className="text-sm text-gray-600 mb-2">Tier: {division.order}. Equipos: {division.teams.length}</p>
 
-            // 1. Encontrar la división de destino
-            let targetDivisionIndex = currentDivisionIndex + direction;
-            let targetDivision = null;
-            let targetDivisionLevel = null;
-
-            while (targetDivisionIndex >= 0 && targetDivisionIndex < allDivisions.length) {
-                const potentialTarget = allDivisions[targetDivisionIndex];
-                
-                // Si el movimiento es entre niveles (cambio de levelId)
-                if (potentialTarget.levelId !== allDivisions[currentDivisionIndex].levelId) {
-                    // Si se mueve hacia arriba (direction = -1), el destino es la última división del nivel anterior.
-                    // Si se mueve hacia abajo (direction = 1), el destino es la primera división del nivel siguiente.
-                    
-                    const targetLevel = appStructure.find(l => l.id === potentialTarget.levelId);
-                    if (targetLevel.divisions.length > 0) {
-                        targetDivision = direction === -1 ? 
-                            targetLevel.divisions[targetLevel.divisions.length - 1] : 
-                            targetLevel.divisions[0];
-                        targetDivisionLevel = targetLevel.name;
-                        break;
-                    }
-                }
-                
-                // Si el movimiento es lateral dentro del mismo nivel (cambio de division id)
-                if (potentialTarget.levelId === allDivisions[currentDivisionIndex].levelId && potentialTarget.id !== currentDivisionId) {
-                    targetDivision = potentialTarget;
-                    targetDivisionLevel = potentialTarget.levelName;
-                    break;
-                }
-
-                // Continuar buscando
-                targetDivisionIndex += direction;
-            }
-
-            if (!targetDivision) {
-                showMessage(`No se puede mover el equipo '${teamName}' ${direction === -1 ? 'más arriba' : 'más abajo'}.`, true);
-                return;
-            }
-
-            // 2. Ejecutar el movimiento
-            const currentDivision = allDivisions[currentDivisionIndex];
-            
-            // Remover de la división actual
-            const sourceLevel = appStructure.find(l => l.id === currentDivision.levelId);
-            const sourceDivision = sourceLevel.divisions.find(d => d.id === currentDivisionId);
-            sourceDivision.teams = sourceDivision.teams.filter(t => t !== teamName);
-
-            // Añadir a la división de destino
-            const destLevel = appStructure.find(l => l.id === targetDivision.levelId);
-            const destDivision = destLevel.divisions.find(d => d.id === targetDivision.id);
-            destDivision.teams.push(teamName);
-            destDivision.teams.sort(); // Opcional: mantener el orden alfabético
-
-            renderApp();
-            const actionText = direction === -1 ? `promovido de ${currentDivision.name} a ${destDivision.name} (${targetDivisionLevel})` : 
-                                                `descendido de ${currentDivision.name} a ${destDivision.name} (${targetDivisionLevel})`;
-            recordAction(`Equipo '${teamName}' ${actionText}`);
-        }
-
-        /** Elimina un equipo de una división. */
-        window.removeTeam = function(teamName, divisionId) {
-            const division = appStructure.flatMap(l => l.divisions).find(d => d.id === divisionId);
-            if (division) {
-                division.teams = division.teams.filter(t => t !== teamName);
-                renderApp();
-                recordAction(`Equipo '${teamName}' eliminado de ${division.name}`);
-            }
-        }
-
-        /** Reinicia la simulación a la estructura por defecto. */
-        window.resetStructure = function() {
-             // NOTA: En un entorno de producción, esto debería ser un modal de confirmación, no un alert.
-             if (window.confirm("¿Estás seguro que quieres reiniciar la estructura a los valores por defecto? Se perderán los cambios no guardados en la versión guardada en la nube.")) {
-                appStructure = JSON.parse(JSON.stringify(defaultStructure));
-                simulationHistory = [];
-                openAccordions = [];
-                renderApp();
-                saveStructure();
-                showMessage("Estructura reiniciada a los valores por defecto.");
-            }
-        }
-        
-        /** Limpia el historial de acciones. */
-        window.clearHistory = function() {
-            simulationHistory = [];
-            renderApp();
-            saveStructure();
-        }
-
-        // Inicializar la aplicación al cargar la ventana
-        window.onload = initializeFirebase;
-
-    </script>
-    <style>
-        /* Estilos personalizados para la barra de desplazamiento */
-        .custom-scrollbar::-webkit-scrollbar {
-            width: 8px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-            background-color: #cbd5e1; /* gray-300 */
-            border-radius: 4px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-            background: #f1f5f9; /* gray-100 */
-            border-radius: 4px;
-        }
-        /* Ajuste para el número de columnas de la rejilla de divisiones */
-        .grid-cols-2 {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-        @media (max-width: 768px) {
-            .grid-cols-2 {
-                grid-template-columns: repeat(1, minmax(0, 1fr));
-            }
-        }
-    </style>
-</head>
-<body class="bg-gray-50 min-h-screen font-sans p-4 sm:p-8">
-
-    <!-- Encabezado y Meta-información -->
-    <header class="text-center mb-10">
-        <h1 class="text-4xl sm:text-5xl font-extrabold text-indigo-800">
-            Simulador de Reestructuración de Ligas Argentinas
-        </h1>
-        <p class="text-lg text-gray-600 mt-2">Diseña y prueba tu propio sistema de ascensos/descensos.</p>
-        <div class="mt-4 text-sm text-gray-500">
-            <span>Usuario ID: <strong id="user-id-display" class="font-mono text-gray-800">Cargando...</strong></span>
-        </div>
-    </header>
-
-    <!-- Caja de Mensajes (No se usa alert/confirm) -->
-    <div id="message-box" class="opacity-0 hidden max-w-4xl mx-auto">
-        <p id="message-text"></p>
-    </div>
-
-    <!-- Panel de Control y Resumen -->
-    <div class="max-w-4xl mx-auto mb-10 bg-white p-6 rounded-2xl shadow-xl border border-indigo-100">
-        <h2 class="text-2xl font-bold text-indigo-700 mb-4 border-b pb-2">Resumen y Control</h2>
-        <div class="flex flex-col sm:flex-row justify-around items-center space-y-4 sm:space-y-0 text-center">
-            <p class="text-gray-700">Niveles: <strong id="total-levels" class="text-indigo-600 text-xl">0</strong></p>
-            <p class="text-gray-700">Equipos Totales: <strong id="total-teams" class="text-indigo-600 text-xl">0</strong></p>
-            <div class="flex space-x-3">
-                <button onclick="addLevel()" class="px-4 py-2 bg-green-500 text-white font-semibold rounded-xl hover:bg-green-600 transition duration-300 shadow-lg">
-                    <svg class="w-5 h-5 inline-block -mt-0.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                    Añadir Nivel
-                </button>
-                <button onclick="resetStructure()" class="px-4 py-2 bg-red-500 text-white font-semibold rounded-xl hover:bg-red-600 transition duration-300 shadow-lg">
-                    <svg class="w-5 h-5 inline-block -mt-0.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356-2A8.001 8.001 0 004.582 19.42M20 20v-5h-.581m0 0a8.003 8.003 0 01-15.357-2.122"></path></svg>
-                    Reiniciar
-                </button>
+            <div className="flex space-x-2">
+                <label className="text-sm text-green-700 flex items-center">
+                    Ascensos:
+                    <input
+                        type="number" min="0" value={division.ascend}
+                        onChange={(e) => handleRuleChange(division.id, 'ascend', e.target.value)}
+                        className="w-12 ml-1 p-1 border rounded text-center text-gray-800"
+                    />
+                </label>
+                <label className="text-sm text-red-700 flex items-center">
+                    Descensos:
+                    <input
+                        type="number" min="0" value={division.descend}
+                        onChange={(e) => handleRuleChange(division.id, 'descend', e.target.value)}
+                        className="w-12 ml-1 p-1 border rounded text-center text-gray-800"
+                    />
+                </label>
             </div>
         </div>
-    </div>
+    );
+    
+    const TeamList = ({ division }) => {
+        const teams = division.teams;
+        
+        const handleDragStart = (e, teamName) => {
+            setDraggedItem({ name: teamName, fromId: division.id });
+            e.dataTransfer.effectAllowed = "move";
+            e.dataTransfer.setData("text/plain", teamName);
+        };
+        
+        const handleDragOver = (e) => e.preventDefault();
+        
+        const handleDrop = (e, targetIndex) => {
+            e.preventDefault();
+            if (!draggedItem || draggedItem.name === teams[targetIndex]) return;
 
-    <!-- Contenedor de la Estructura de Ligas -->
-    <main id="structure-container" class="max-w-4xl mx-auto"></main>
+            // Mover dentro de la misma división
+            if (draggedItem.fromId === division.id) {
+                const oldIndex = teams.indexOf(draggedItem.name);
+                moveTeamInDivision(division.id, draggedItem.name, targetIndex);
+            } else {
+                // Lógica de movimiento entre divisiones (simplemente se añade al destino en la posición targetIndex, y se elimina del origen)
+                const sourceDiv = leagueStructure.find(d => d.id === draggedItem.fromId);
+                if (sourceDiv) {
+                    // Remover del origen
+                    const newSourceTeams = sourceDiv.teams.filter(t => t !== draggedItem.name);
+                    
+                    // Añadir al destino
+                    const newTargetTeams = [...teams];
+                    newTargetTeams.splice(targetIndex, 0, draggedItem.name);
+                    
+                    const newStructure = leagueStructure.map(d => {
+                        if (d.id === draggedItem.fromId) return { ...d, teams: newSourceTeams };
+                        if (d.id === division.id) return { ...d, teams: newTargetTeams };
+                        return d;
+                    }).sort((a, b) => a.order - b.order);
+                    
+                    saveLeagueStructure(newStructure);
+                }
+            }
+            setDraggedItem(null);
+        };
+        
+        const moveTeam = (teamName, direction) => {
+            const index = teams.indexOf(teamName);
+            const newIndex = index + (direction === 'up' ? -1 : 1);
+            if (newIndex >= 0 && newIndex < teams.length) {
+                moveTeamInDivision(division.id, teamName, newIndex);
+            }
+        };
 
-    <!-- Historial de Acciones -->
-    <div class="max-w-4xl mx-auto mt-10 p-6 bg-gray-200 rounded-2xl shadow-inner" id="history-container">
-        <!-- El historial se renderiza aquí -->
-    </div>
+        const getRuleBadge = (rank) => {
+            if (rank <= division.ascend && division.order > 1) return 'bg-lime-200 text-lime-800 border-lime-500';
+            if (rank > teams.length - division.descend) return 'bg-red-200 text-red-800 border-red-500';
+            if (rank === 1 && division.order === 1) return 'bg-yellow-200 text-yellow-800 border-yellow-500';
+            return 'bg-gray-100 text-gray-700 border-gray-300';
+        };
 
-    <footer class="text-center mt-8 text-xs text-gray-400">
-        <p>Simulador Dinámico - Desarrollado con Firebase Firestore y Tailwind CSS.</p>
-    </footer>
+        return (
+            <div className="bg-white p-4 rounded-xl shadow-lg h-full">
+                <h3 className="text-xl font-bold mb-4 text-gray-800 flex items-center justify-between">
+                    {division.name} (Tier {division.order})
+                    <Shuffle className="w-5 h-5 text-indigo-500 cursor-pointer hover:rotate-180 transition-transform" onClick={() => updateDivisionTeams(division.id, [...teams].sort(() => Math.random() - 0.5))} title="Reordenar Aleatoriamente" />
+                </h3>
+                <ul className="space-y-2">
+                    {teams.map((team, index) => (
+                        <li
+                            key={team}
+                            draggable
+                            onDragStart={(e) => handleDragStart(e, team)}
+                            onDragOver={handleDragOver}
+                            onDrop={(e) => handleDrop(e, index)}
+                            className={`p-3 rounded-lg flex justify-between items-center cursor-move transition-all duration-150 border-l-4 ${getRuleBadge(index + 1)} ${draggedItem && draggedItem.name === team ? 'opacity-50' : 'hover:bg-gray-100'}`}
+                        >
+                            <div className="flex items-center space-x-3">
+                                <span className="w-8 text-center text-lg font-mono font-bold text-gray-800">{index + 1}.</span>
+                                <span className="text-sm md:text-base font-medium text-gray-900">{team}</span>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                                {/* Botones de Flecha */}
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); moveTeam(team, 'up'); }}
+                                    disabled={index === 0}
+                                    className="p-1.5 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-full disabled:text-gray-300 disabled:bg-gray-100 transition-colors"
+                                    title="Subir"
+                                >
+                                    <ArrowUp className="w-4 h-4" />
+                                </button>
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); moveTeam(team, 'down'); }}
+                                    disabled={index === teams.length - 1}
+                                    className="p-1.5 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-full disabled:text-gray-300 disabled:bg-gray-100 transition-colors"
+                                    title="Bajar"
+                                >
+                                    <ArrowDown className="w-4 h-4" />
+                                </button>
+                            </div>
+                        </li>
+                    ))}
+                    {/* Placeholder para drop al final */}
+                    {teams.length === 0 && (
+                        <li onDragOver={handleDragOver} onDrop={(e) => handleDrop(e, 0)} className="border-2 border-dashed border-indigo-300 p-8 text-center text-indigo-500 rounded-lg">
+                            Arrastra un equipo aquí para añadirlo.
+                        </li>
+                    )}
+                </ul>
+            </div>
+        );
+    };
 
-</body>
-</html>
+    if (!isAuthReady) {
+        return (
+            <div className="flex justify-center items-center h-screen bg-gray-100">
+                <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
+                <span className="ml-3 text-lg font-medium text-gray-700">Cargando datos de la liga...</span>
+            </div>
+        );
+    }
+    
+    const currentDivision = leagueStructure.find(d => d.id === currentDivisionId);
+    const sortedLeague = [...leagueStructure].sort((a, b) => a.order - b.order);
+
+    return (
+        <div className="min-h-screen bg-gray-50 font-sans p-4 md:p-8">
+            <header className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded-xl shadow-lg mb-6 border-b-4 border-indigo-600">
+                <h1 className="text-3xl font-extrabold text-indigo-700 flex items-center">
+                    <Trophy className="w-7 h-7 mr-2" />
+                    Liga Argentina Simulador Dinámico
+                </h1>
+                <div className="mt-4 md:mt-0 flex items-center space-x-3">
+                    <span className="text-sm font-medium text-gray-600 flex items-center">
+                        <User className="w-4 h-4 mr-1" />
+                        {user ? user.displayName || user.email?.split('@')[0] || 'Anónimo' : 'Cargando...'}
+                    </span>
+                    {user && !user.isAnonymous ? (
+                        <button onClick={handleSignOut} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors shadow-md">
+                            <LogOut className="w-4 h-4 mr-1" /> Cerrar Sesión
+                        </button>
+                    ) : (
+                        <button onClick={handleGoogleSignIn} className="flex items-center px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors shadow-md">
+                            <LogIn className="w-4 h-4 mr-1" /> Google Sign-In
+                        </button>
+                    )}
+                </div>
+            </header>
+
+            {error && (
+                <div className="p-4 mb-4 text-sm text-red-800 rounded-lg bg-red-50 shadow-md" role="alert">
+                    {error}
+                </div>
+            )}
+
+            <main className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Panel de Configuración y Simulación */}
+                <div className="lg:col-span-1 space-y-6">
+                    <div className="bg-white p-6 rounded-xl shadow-lg">
+                        <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center justify-between border-b pb-2">
+                            Configuración de la Liga
+                            <button onClick={() => setIsConfigMode(!isConfigMode)} className="p-2 bg-gray-100 rounded-full hover:bg-indigo-100 text-indigo-600 transition">
+                                <Settings className="w-5 h-5" />
+                            </button>
+                        </h2>
+                        
+                        {/* Selector de División */}
+                        <div className={`transition-all duration-300 ${isConfigMode ? 'hidden' : 'block'}`}>
+                            <p className="text-sm text-gray-600 mb-2">Selecciona una división para ver/editar su ranking:</p>
+                            <div className="grid grid-cols-2 gap-3 max-h-48 overflow-y-auto">
+                                {sortedLeague.map(div => (
+                                    <button
+                                        key={div.id}
+                                        onClick={() => setCurrentDivisionId(div.id)}
+                                        className={`px-4 py-2 text-sm font-medium rounded-lg transition-all shadow-sm ${currentDivisionId === div.id
+                                            ? 'bg-indigo-600 text-white shadow-indigo-400/50'
+                                            : 'bg-gray-200 text-gray-700 hover:bg-indigo-100 hover:text-indigo-700'
+                                        }`}
+                                    >
+                                        {div.name} (Tier {div.order})
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Modo de Configuración (Ascensos/Descensos/Eliminar) */}
+                        <div className={`transition-all duration-300 ${isConfigMode ? 'block' : 'hidden'}`}>
+                            <p className="text-sm text-gray-600 mb-3">Ajusta las reglas de ascenso/descenso y estructura:</p>
+                            <div className="max-h-64 overflow-y-auto pr-2">
+                                {sortedLeague.map(div => (
+                                    <DivisionConfigPanel key={div.id} division={div} />
+                                ))}
+                            </div>
+                            <button onClick={handleAddDivision} className="w-full mt-3 flex items-center justify-center py-2 text-sm font-medium text-indigo-600 border border-indigo-600 rounded-lg hover:bg-indigo-50 transition">
+                                <Plus className="w-4 h-4 mr-1" /> Añadir Nueva División
+                            </button>
+                        </div>
+                    </div>
+                    
+                    {/* Botón de Simulación */}
+                    <div className="bg-white p-6 rounded-xl shadow-lg">
+                        <h2 className="text-xl font-bold text-gray-800 mb-4 border-b pb-2">Simular Temporada</h2>
+                        <button
+                            onClick={simulateSeason}
+                            disabled={!user || user.isAnonymous || isSimulating || leagueStructure.length === 0}
+                            className={`w-full flex items-center justify-center px-6 py-3 text-lg font-bold rounded-lg transition-all transform shadow-2xl
+                                ${isSimulating
+                                    ? 'bg-gray-400 text-gray-700'
+                                    : 'bg-green-600 text-white hover:bg-green-700 active:scale-98 shadow-green-400/50'
+                                }`}
+                            title={!user || user.isAnonymous ? "Debes iniciar sesión para guardar simulaciones" : "Simular la temporada en base al ranking y reglas actuales"}
+                        >
+                            {isSimulating ? (
+                                <><Loader2 className="w-5 h-5 mr-2 animate-spin" /> Simulación en curso...</>
+                            ) : (
+                                <>¡Correr Temporada {new Date().getFullYear()}! </>
+                            )}
+                        </button>
+                        {!user || user.isAnonymous ? (
+                            <p className="mt-3 text-xs text-red-500 text-center">Inicia sesión con Google para usar y guardar la configuración.</p>
+                        ) : (
+                            <p className="mt-3 text-xs text-gray-500 text-center">Las reglas de ascenso/descenso configuradas serán aplicadas.</p>
+                        )}
+                    </div>
+                </div>
+
+                {/* Panel de Ranking de Equipos */}
+                <div className="lg:col-span-2">
+                    {currentDivision ? (
+                        <TeamList division={currentDivision} />
+                    ) : (
+                        <div className="bg-white p-12 rounded-xl shadow-lg text-center text-gray-500">
+                            Selecciona una división o espera a que se cargue la estructura de la liga.
+                        </div>
+                    )}
+                </div>
+            </main>
+
+            {/* Historial de Campeonatos */}
+            <section className="mt-8 bg-white p-6 rounded-xl shadow-lg">
+                <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center border-b pb-2">
+                    <Clock className="w-5 h-5 mr-2" />
+                    Historial de Simulaciones
+                </h2>
+                <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
+                    {history.length > 0 ? (
+                        history.map((sim, index) => (
+                            <div key={sim.id} className="p-3 border rounded-lg bg-gray-50 shadow-sm hover:bg-gray-100 transition">
+                                <p className="text-xs font-semibold text-indigo-600 mb-1 flex justify-between items-center">
+                                    <span>Simulación {history.length - index} | Fecha: {sim.timestamp?.toLocaleDateString()}</span>
+                                    <span className="text-gray-500 font-normal">Por: {sim.user.name.split(' ')[0]}</span>
+                                </p>
+                                <ul className="list-disc pl-5 text-sm space-y-0.5">
+                                    {Object.entries(sim.results).map(([divisionName, res]) => (
+                                        <li key={divisionName} className="text-gray-700">
+                                            <span className="font-medium text-xs">{divisionName}:</span>
+                                            <span className="font-bold text-green-700 ml-1">Campeón: {res.champion}</span>
+                                            {res.ascensos?.length > 0 && <span className="ml-2 text-xs text-lime-700">(+{res.ascensos.length} Asc)</span>}
+                                            {res.descensos?.length > 0 && <span className="ml-1 text-xs text-red-700">(-{res.descensos.length} Desc)</span>}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        ))
+                    ) : (
+                        <p className="text-gray-500 text-sm text-center py-4">No hay simulaciones en el historial todavía.</p>
+                    )}
+                </div>
+            </section>
+        </div>
+    );
+};
+
+export default App;
